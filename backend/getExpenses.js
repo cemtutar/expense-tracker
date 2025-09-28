@@ -10,7 +10,7 @@ export const handler = async () => {
 
     const expenses = data.Items.map((item) => ({
         id: item.id.S,
-        amount: item.amount.N,
+        amount: Number(item.amount.N),
         category: item.category.S,
         date: item.date.S,
     }));
@@ -19,5 +19,7 @@ export const handler = async () => {
     return { statusCode: 200, body: JSON.stringify(expenses) };
 };
 
-console.log("API_BASE:", API_BASE);
-console.log("Full URL:", `${API_BASE}/getExpenses`);
+if (typeof API_BASE !== "undefined") {
+    console.log("API_BASE:", API_BASE);
+    console.log("Full URL:", `${API_BASE}/getExpenses`);
+}
