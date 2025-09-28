@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { addExpense, getExpenses } from './api';
+import { addExpense, deleteExpense, getExpenses, updateExpense } from './api';
 import './App.css';
 
 const TOTAL_BUDGET = 2000;
@@ -30,6 +30,26 @@ const upcoming = [
   },
 ];
 
+const categoryOptions = [
+  { value: 'food', label: 'Food & Dining' },
+  { value: 'housing', label: 'Housing' },
+  { value: 'transport', label: 'Transportation' },
+  { value: 'entertainment', label: 'Entertainment' },
+  { value: 'wellness', label: 'Wellness' },
+  { value: 'other', label: 'Other' },
+];
+
+const statusOptions = ['Pending', 'Cleared', 'Scheduled'];
+
+const defaultEditValues = {
+  name: '',
+  category: '',
+  amount: '',
+  date: '',
+  method: '',
+  status: '',
+};
+
 const budgetStatus = (spent, limit) => {
   if (spent > limit) {
     return 'over';
@@ -55,22 +75,36 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [formError, setFormError] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState(null);
+  const [editValues, setEditValues] = useState(defaultEditValues);
+  const [modalError, setModalError] = useState(null);
+  const [modalLoading, setModalLoading] = useState(false);
 
-  useEffect(() => {
-    const fetchExpenses = async () => {
+  const safeText = (value) =>
+    typeof value === 'string' && value.trim() ? value : '—';
+
+  const refreshExpenses = async ({ showSpinner = true } = {}) => {
+    if (showSpinner) {
       setLoading(true);
-      try {
-        const data = await getExpenses();
-        setExpenses(Array.isArray(data) ? data : []);
-        setError(null);
-      } catch (err) {
-        setError('Unable to load expenses right now.');
-      } finally {
+    }
+
+    try {
+      const data = await getExpenses();
+      setExpenses(Array.isArray(data) ? data : []);
+      setError(null);
+    } catch (err) {
+      setError('Unable to load expenses right now.');
+      throw err;
+    } finally {
+      if (showSpinner) {
         setLoading(false);
       }
-    };
+    }
+  };
 
-    fetchExpenses();
+  useEffect(() => {
+    refreshExpenses().catch(() => {});
   }, []);
 
   const handleAddExpense = async (event) => {
@@ -105,14 +139,139 @@ const App = () => {
       setLoading(true);
       await addExpense(payload);
       form.reset();
-      const data = await getExpenses();
-      setExpenses(Array.isArray(data) ? data : []);
-      setError(null);
+      await refreshExpenses();
       setFormError(null);
     } catch (err) {
       setFormError('Unable to add expense right now.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openModal = () => {
+    if (modalLoading) {
+      return;
+    }
+    setIsModalOpen(true);
+    setEditingExpenseId(null);
+    setEditValues(defaultEditValues);
+    setModalError(null);
+  };
+
+  const closeModal = () => {
+    if (modalLoading) {
+      return;
+    }
+    setIsModalOpen(false);
+    setEditingExpenseId(null);
+    setEditValues(defaultEditValues);
+    setModalError(null);
+  };
+
+  const startEditingExpense = (expense) => {
+    if (
+      modalLoading ||
+      typeof expense?.id !== 'string' ||
+      expense.id.trim() === ''
+    ) {
+      return;
+    }
+
+    setEditingExpenseId(expense.id);
+    setEditValues({
+      name: typeof expense?.name === 'string' ? expense.name : '',
+      category: typeof expense?.category === 'string' ? expense.category : '',
+      amount:
+        expense?.amount !== undefined && expense?.amount !== null
+          ? String(expense.amount)
+          : '',
+      date: typeof expense?.date === 'string' ? expense.date : '',
+      method: typeof expense?.method === 'string' ? expense.method : '',
+      status: typeof expense?.status === 'string' ? expense.status : '',
+    });
+    setModalError(null);
+  };
+
+  const handleEditFieldChange = (field, value) => {
+    setEditValues((previous) => ({ ...previous, [field]: value }));
+  };
+
+  const cancelEdit = () => {
+    if (modalLoading) {
+      return;
+    }
+    setEditingExpenseId(null);
+    setEditValues(defaultEditValues);
+    setModalError(null);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingExpenseId || modalLoading) {
+      return;
+    }
+
+    const trimmedName = editValues.name.trim();
+    const categoryValue = editValues.category.trim();
+    const dateValue = editValues.date.trim();
+    const methodValue = editValues.method.trim();
+    const statusValue = editValues.status.trim();
+    const amountNumber = Number(editValues.amount);
+
+    if (
+      !trimmedName ||
+      !categoryValue ||
+      !dateValue ||
+      !methodValue ||
+      !statusValue ||
+      !Number.isFinite(amountNumber)
+    ) {
+      setModalError('Please provide valid values for all fields.');
+      return;
+    }
+
+    setModalError(null);
+    setModalLoading(true);
+
+    try {
+      await updateExpense(editingExpenseId, {
+        name: trimmedName,
+        category: categoryValue,
+        amount: amountNumber,
+        date: dateValue,
+        method: methodValue,
+        status: statusValue,
+      });
+      await refreshExpenses({ showSpinner: false });
+      setEditingExpenseId(null);
+      setEditValues(defaultEditValues);
+    } catch (err) {
+      setModalError('Unable to update expense right now.');
+      return;
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const handleDeleteExpense = async (id) => {
+    if (modalLoading || typeof id !== 'string' || id.trim() === '') {
+      return;
+    }
+
+    setModalError(null);
+    setModalLoading(true);
+
+    try {
+      await deleteExpense(id);
+      await refreshExpenses({ showSpinner: false });
+      if (editingExpenseId === id) {
+        setEditingExpenseId(null);
+        setEditValues(defaultEditValues);
+      }
+    } catch (err) {
+      setModalError('Unable to delete expense right now.');
+      return;
+    } finally {
+      setModalLoading(false);
     }
   };
 
@@ -211,6 +370,12 @@ const App = () => {
     ? `Last updated ${latestExpenseDate.toLocaleString()}`
     : 'No expenses recorded yet';
 
+  const modalBackdropClick = (event) => {
+    if (event.target === event.currentTarget) {
+      closeModal();
+    }
+  };
+
   return (
     <div className="App">
       <div className="app-shell">
@@ -245,18 +410,19 @@ const App = () => {
           <section className="layout-grid primary-grid">
             <article className="card expenses-card">
               <div className="card-heading">
-                <div>
-                  <h2>Recent activity</h2>
-                  <p className="muted">{lastUpdatedLabel}</p>
-                </div>
-                <button className="ghost-button" type="button">
-                  View all
-                </button>
+              <div>
+                <h2>Recent activity</h2>
+                <p className="muted">{lastUpdatedLabel}</p>
               </div>
+              <button className="ghost-button" type="button" onClick={openModal}>
+                View all
+              </button>
+            </div>
               <table className="expense-table">
                 <thead>
                   <tr>
-                    <th>Expense</th>
+                    <th>Name</th>
+                    <th>Date</th>
                     <th>Category</th>
                     <th>Payment</th>
                     <th>Amount</th>
@@ -266,44 +432,57 @@ const App = () => {
                 <tbody>
                   {loading && (
                     <tr>
-                      <td colSpan="5" className="muted">
+                      <td colSpan="6" className="muted">
                         Loading expenses…
                       </td>
                     </tr>
                   )}
                   {!loading && error && (
                     <tr>
-                      <td colSpan="5" className="error">
+                      <td colSpan="6" className="error">
                         {error}
                       </td>
                     </tr>
                   )}
                   {!loading && !error && expenses.length === 0 && (
                     <tr>
-                      <td colSpan="5" className="muted">
+                      <td colSpan="6" className="muted">
                         No expenses to display yet.
                       </td>
                     </tr>
                   )}
                   {!loading && !error &&
-                    expenses.map((expense) => (
-                      <tr key={expense.id}>
-                        <td>
-                          <div className="expense-name">
-                            <strong>{expense.name}</strong>
-                            <span>{expense.date}</span>
-                          </div>
-                        </td>
-                        <td>{expense.category}</td>
-                        <td>{expense.method}</td>
-                        <td className="expense-amount">{formatCurrency(expense.amount)}</td>
-                        <td>
-                          <span className={`status-pill ${expense.status?.toLowerCase?.() || ''}`}>
-                            {expense.status || '—'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    expenses.map((expense, index) => {
+                      const amountValue = Number(expense?.amount);
+                      const formattedAmount = Number.isFinite(amountValue)
+                        ? formatCurrency(amountValue)
+                        : '—';
+                      const statusClass =
+                        typeof expense?.status === 'string'
+                          ? expense.status.toLowerCase()
+                          : '';
+                      const key =
+                        typeof expense?.id === 'string' && expense.id.trim()
+                          ? expense.id
+                          : `expense-${index}`;
+
+                      return (
+                        <tr key={key}>
+                          <td className="expense-name">{safeText(expense?.name)}</td>
+                          <td>
+                            <span className="expense-date">{safeText(expense?.date)}</span>
+                          </td>
+                          <td>{safeText(expense?.category)}</td>
+                          <td>{safeText(expense?.method)}</td>
+                          <td className="expense-amount">{formattedAmount}</td>
+                          <td>
+                            <span className={`status-pill ${statusClass}`}>
+                              {safeText(expense?.status)}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </article>
@@ -313,13 +492,18 @@ const App = () => {
                 <h2>Log a new expense</h2>
                 <p className="muted">Quickly capture spending to keep your budgets accurate.</p>
               </div>
-              <form className="expense-form" onSubmit={handleAddExpense}>
+              <form className="expense-form" onSubmit={handleAddExpense} onSubmit={handleAddExpense}>
                 <label className="form-field">
                   <span>Expense name</span>
                   <input
+                   
                     type="text"
+                   
                     name="name"
+                   
                     placeholder="Coffee with clients"
+                    required
+                 
                     required
                   />
                 </label>
@@ -329,29 +513,35 @@ const App = () => {
                     <option value="" disabled>
                       Select a category
                     </option>
-                    <option value="food">Food & Dining</option>
-                    <option value="housing">Housing</option>
-                    <option value="transport">Transportation</option>
-                    <option value="entertainment">Entertainment</option>
-                    <option value="wellness">Wellness</option>
-                    <option value="other">Other</option>
+                    {categoryOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <div className="form-row">
                   <label className="form-field">
                     <span>Amount</span>
                     <input
+                     
                       type="number"
+                     
                       name="amount"
+                     
                       placeholder="0.00"
+                     
                       min="0"
+                      step="0.01"
+                      required
+                   
                       step="0.01"
                       required
                     />
                   </label>
                   <label className="form-field">
                     <span>Date</span>
-                    <input type="date" name="date" required />
+                    <input type="date" name="date" required required />
                   </label>
                 </div>
                 <label className="form-field">
@@ -369,9 +559,11 @@ const App = () => {
                     <option value="" disabled>
                       Select a status
                     </option>
-                    <option value="Pending">Pending</option>
-                    <option value="Cleared">Cleared</option>
-                    <option value="Scheduled">Scheduled</option>
+                    {statusOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 {formError && <p className="error">{formError}</p>}
@@ -385,30 +577,31 @@ const App = () => {
           <section className="layout-grid insights-grid">
             <article className="card budgets-card">
               <div className="card-heading">
-                <h2>Category budgets</h2>
-                <p className="muted">Stay mindful of your spending goals across categories.</p>
+                <h2>Budget health</h2>
+                <p className="muted">Track where your limits are approaching.</p>
               </div>
               <ul className="budget-list">
                 {budgets.map((budget) => {
-                  const percent = Math.round((budget.spent / budget.limit) * 100);
                   const status = budgetStatus(budget.spent, budget.limit);
+                  const percent = Math.min((budget.spent / budget.limit) * 100, 150);
+
                   return (
                     <li key={budget.id} className="budget-item">
                       <div className="budget-meta">
                         <div>
                           <p className="budget-label">{budget.label}</p>
-                          <span className="muted">
-                            {formatCurrency(budget.spent)} of {formatCurrency(budget.limit)}
-                          </span>
+                          <p className="muted">
+                            {formatCurrency(budget.spent)} of {formatCurrency(budget.limit)} spent
+                          </p>
                         </div>
                         <span className={`budget-percent ${status}`}>
-                          {percent}%
+                          {Math.round(percent)}%
                         </span>
                       </div>
                       <div className="progress">
                         <div
                           className={`progress-bar ${status}`}
-                          style={{ width: `${Math.min(percent, 110)}%` }}
+                          style={{ width: `${Math.min(percent, 100)}%` }}
                         />
                       </div>
                     </li>
@@ -417,27 +610,266 @@ const App = () => {
               </ul>
             </article>
 
-            <article className="card planning-card">
+            <article className="card upcoming-card">
               <div className="card-heading">
-                <h2>Planning ahead</h2>
-                <p className="muted">A few suggestions to keep future spending stress-free.</p>
+                <h2>Upcoming plans</h2>
+                <p className="muted">Look ahead and budget for what matters.</p>
               </div>
-              <ul className="planning-list">
+              <ul className="upcoming-list">
                 {upcoming.map((item) => (
-                  <li key={item.id}>
+                  <li key={item.id} className="upcoming-item">
                     <h3>{item.title}</h3>
                     <p>{item.description}</p>
                   </li>
                 ))}
               </ul>
-              <div className="tip-box">
-                <strong>Tip:</strong> Automate a small weekly transfer into your savings to make
-                progress on goals without thinking about it.
-              </div>
             </article>
           </section>
         </main>
       </div>
+
+      {isModalOpen && (
+        <div className="modal-backdrop" onClick={modalBackdropClick}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="all-transactions-heading"
+          >
+            <div className="modal-header">
+              <div>
+                <h3 id="all-transactions-heading">All transactions</h3>
+                <p className="muted">
+                  Manage every logged expense without leaving your dashboard.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={closeModal}
+                aria-label="Close"
+                disabled={modalLoading}
+              >
+                ×
+              </button>
+            </div>
+            {modalError && <p className="error modal-error">{modalError}</p>}
+            {modalLoading && <p className="muted modal-status">Working…</p>}
+            <div className="modal-table-wrapper">
+              <table className="expense-table modal-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th>Payment</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {expenses.length === 0 && (
+                    <tr>
+                      <td colSpan="7" className="muted">
+                        No expenses to display yet.
+                      </td>
+                    </tr>
+                  )}
+                  {expenses.length > 0 &&
+                    expenses.map((expense, index) => {
+                      const amountValue = Number(expense?.amount);
+                      const formattedAmount = Number.isFinite(amountValue)
+                        ? formatCurrency(amountValue)
+                        : '—';
+                      const statusClass =
+                        typeof expense?.status === 'string'
+                          ? expense.status.toLowerCase()
+                          : '';
+                      const hasPersistedId =
+                        typeof expense?.id === 'string' && expense.id.trim() !== '';
+                      const expenseId = hasPersistedId
+                        ? expense.id
+                        : `expense-${index}`;
+                      const isEditing = hasPersistedId && editingExpenseId === expense.id;
+
+                      if (isEditing) {
+                        return (
+                          <tr key={expenseId}>
+                            <td>
+                              <input
+                                className="table-input"
+                                type="text"
+                                value={editValues.name}
+                                onChange={(event) =>
+                                  handleEditFieldChange('name', event.target.value)
+                                }
+                                placeholder="Expense name"
+                                disabled={modalLoading}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="table-input"
+                                type="date"
+                                value={editValues.date}
+                                onChange={(event) =>
+                                  handleEditFieldChange('date', event.target.value)
+                                }
+                                disabled={modalLoading}
+                              />
+                            </td>
+                            <td>
+                              <select
+                                className="table-input"
+                                value={editValues.category}
+                                onChange={(event) =>
+                                  handleEditFieldChange('category', event.target.value)
+                                }
+                                disabled={modalLoading}
+                              >
+                                <option value="" disabled>
+                                  Select
+                                </option>
+                                {categoryOptions.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td>
+                              <input
+                                className="table-input"
+                                type="text"
+                                value={editValues.method}
+                                onChange={(event) =>
+                                  handleEditFieldChange('method', event.target.value)
+                                }
+                                placeholder="Payment method"
+                                disabled={modalLoading}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="table-input"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={editValues.amount}
+                                onChange={(event) =>
+                                  handleEditFieldChange('amount', event.target.value)
+                                }
+                                placeholder="0.00"
+                                disabled={modalLoading}
+                              />
+                            </td>
+                            <td>
+                              <select
+                                className="table-input"
+                                value={editValues.status}
+                                onChange={(event) =>
+                                  handleEditFieldChange('status', event.target.value)
+                                }
+                                disabled={modalLoading}
+                              >
+                                <option value="" disabled>
+                                  Select
+                                </option>
+                                {statusOptions.map((option) => (
+                                  <option key={option} value={option}>
+                                    {option}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="modal-actions">
+                              <button
+                                type="button"
+                                className="button primary"
+                                onClick={handleSaveEdit}
+                                disabled={modalLoading}
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                className="button muted"
+                                onClick={cancelEdit}
+                                disabled={modalLoading}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                className="button danger"
+                                onClick={() => handleDeleteExpense(expense.id)}
+                                disabled={modalLoading}
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      return (
+                        <tr key={expenseId}>
+                          <td className="expense-name">{safeText(expense?.name)}</td>
+                          <td>
+                            <span className="expense-date">{safeText(expense?.date)}</span>
+                          </td>
+                          <td>{safeText(expense?.category)}</td>
+                          <td>{safeText(expense?.method)}</td>
+                          <td className="expense-amount">{formattedAmount}</td>
+                          <td>
+                            <span className={`status-pill ${statusClass}`}>
+                              {safeText(expense?.status)}
+                            </span>
+                          </td>
+                          <td className="modal-actions">
+                            {hasPersistedId ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="button secondary"
+                                  onClick={() => startEditingExpense(expense)}
+                                  disabled={modalLoading}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="button danger"
+                                  onClick={() => handleDeleteExpense(expense.id)}
+                                  disabled={modalLoading}
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            ) : (
+                              <span className="muted">Unavailable</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="button secondary"
+                onClick={closeModal}
+                disabled={modalLoading}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

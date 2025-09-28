@@ -41,3 +41,10 @@ export const deleteExpense = async (id) => {
   );
 };
 
+export const updateExpense = async (id, expense) => {
+  return handleRequest(
+    () => axios.put(`${API_BASE}/expenses/${id}`, expense),
+    `update expense ${id}`
+  );
+};
+

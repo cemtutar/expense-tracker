@@ -8,32 +8,33 @@ const client = new DynamoDBClient();
 export const handler = async (event) => {
     const body = JSON.parse(event.body ?? "{}");
 
-    const amountValue = Number(body.amount);
+    const nameValue = typeof body.name === "string" ? body.name.trim() : "";
     const categoryValue = typeof body.category === "string" ? body.category.trim() : "";
     const dateValue = typeof body.date === "string" ? body.date.trim() : "";
+    const methodValue = typeof body.method === "string" ? body.method.trim() : "";
+    const statusValue = typeof body.status === "string" ? body.status.trim() : "";
+    const amountValue = Number(body.amount);
 
-    if (!Number.isFinite(amountValue) || categoryValue === "" || dateValue === "") {
+    if (
+        nameValue === "" ||
+        categoryValue === "" ||
+        dateValue === "" ||
+        methodValue === "" ||
+        statusValue === "" ||
+        !Number.isFinite(amountValue)
+    ) {
         return { statusCode: 400, body: JSON.stringify({ message: "Invalid expense payload" }) };
     }
 
     const item = {
         id: { S: uuidv4() },
-        amount: { N: amountValue.toString() },
+        name: { S: nameValue },
         category: { S: categoryValue },
         date: { S: dateValue },
+        method: { S: methodValue },
+        status: { S: statusValue },
+        amount: { N: amountValue.toString() },
     };
-
-    if (typeof body.name === "string" && body.name.trim() !== "") {
-        item.name = { S: body.name.trim() };
-    }
-
-    if (typeof body.method === "string" && body.method.trim() !== "") {
-        item.method = { S: body.method.trim() };
-    }
-
-    if (typeof body.status === "string" && body.status.trim() !== "") {
-        item.status = { S: body.status.trim() };
-    }
 
     const params = {
         TableName: "Expenses",
