@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { getExpenses } from './api';
+import { addExpense, getExpenses } from './api';
 import './App.css';
 
 const TOTAL_BUDGET = 2000;
@@ -54,6 +54,7 @@ const App = () => {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [formError, setFormError] = useState(null);
 
   useEffect(() => {
     const fetchExpenses = async () => {
@@ -71,6 +72,49 @@ const App = () => {
 
     fetchExpenses();
   }, []);
+
+  const handleAddExpense = async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+
+    setFormError(null);
+
+    const name = (formData.get('name') || '').trim();
+    const category = (formData.get('category') || '').trim();
+    const amount = Number(formData.get('amount'));
+    const date = (formData.get('date') || '').trim();
+    const method = (formData.get('method') || '').trim();
+    const status = (formData.get('status') || '').trim();
+
+    if (
+      !name ||
+      !category ||
+      !date ||
+      !method ||
+      !status ||
+      !Number.isFinite(amount)
+    ) {
+      setFormError('Please provide valid values for all fields.');
+      return;
+    }
+
+    const payload = { name, category, amount, date, method, status };
+
+    try {
+      setLoading(true);
+      await addExpense(payload);
+      form.reset();
+      const data = await getExpenses();
+      setExpenses(Array.isArray(data) ? data : []);
+      setError(null);
+      setFormError(null);
+    } catch (err) {
+      setFormError('Unable to add expense right now.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const totalSpent = expenses.reduce((sum, expense) => {
     const amount = Number(expense?.amount ?? 0);
@@ -269,14 +313,19 @@ const App = () => {
                 <h2>Log a new expense</h2>
                 <p className="muted">Quickly capture spending to keep your budgets accurate.</p>
               </div>
-              <form className="expense-form">
+              <form className="expense-form" onSubmit={handleAddExpense}>
                 <label className="form-field">
                   <span>Expense name</span>
-                  <input type="text" name="name" placeholder="Coffee with clients" />
+                  <input
+                    type="text"
+                    name="name"
+                    placeholder="Coffee with clients"
+                    required
+                  />
                 </label>
                 <label className="form-field">
                   <span>Category</span>
-                  <select name="category" defaultValue="">
+                  <select name="category" defaultValue="" required>
                     <option value="" disabled>
                       Select a category
                     </option>
@@ -291,17 +340,41 @@ const App = () => {
                 <div className="form-row">
                   <label className="form-field">
                     <span>Amount</span>
-                    <input type="number" name="amount" placeholder="0.00" min="0" />
+                    <input
+                      type="number"
+                      name="amount"
+                      placeholder="0.00"
+                      min="0"
+                      step="0.01"
+                      required
+                    />
                   </label>
                   <label className="form-field">
                     <span>Date</span>
-                    <input type="date" name="date" />
+                    <input type="date" name="date" required />
                   </label>
                 </div>
                 <label className="form-field">
                   <span>Payment method</span>
-                  <input type="text" name="method" placeholder="Card, cash, or account" />
+                  <input
+                    type="text"
+                    name="method"
+                    placeholder="Card, cash, or account"
+                    required
+                  />
                 </label>
+                <label className="form-field">
+                  <span>Status</span>
+                  <select name="status" defaultValue="" required>
+                    <option value="" disabled>
+                      Select a status
+                    </option>
+                    <option value="Pending">Pending</option>
+                    <option value="Cleared">Cleared</option>
+                    <option value="Scheduled">Scheduled</option>
+                  </select>
+                </label>
+                {formError && <p className="error">{formError}</p>}
                 <button className="primary-button" type="submit">
                   Add expense
                 </button>
