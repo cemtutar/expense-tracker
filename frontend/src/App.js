@@ -1,81 +1,9 @@
+import { useEffect, useState } from 'react';
+
+import { getExpenses } from './api';
 import './App.css';
 
-const summaryCards = [
-  {
-    id: 'monthSpend',
-    title: 'Spent this month',
-    value: 1245.18,
-    helper: 'Up 8.5% vs last month',
-    tone: 'alert',
-  },
-  {
-    id: 'budget',
-    title: 'Budget remaining',
-    value: 754.82,
-    helper: 'of $2,000 total budget',
-    tone: 'positive',
-  },
-  {
-    id: 'daily',
-    title: 'Average daily spend',
-    value: 41.5,
-    helper: 'Tracked for the last 7 days',
-  },
-  {
-    id: 'topCategory',
-    title: 'Top category',
-    value: 'Housing',
-    helper: '$560 on rent & utilities',
-  },
-];
-
-const expenseItems = [
-  {
-    id: 1,
-    name: 'Fresh Mart Groceries',
-    category: 'Food & Dining',
-    amount: 68.42,
-    method: 'Visa •• 3124',
-    date: 'Mar 12, 2024',
-    status: 'Cleared',
-  },
-  {
-    id: 2,
-    name: 'Cityline Utilities',
-    category: 'Housing',
-    amount: 142.18,
-    method: 'Checking',
-    date: 'Mar 10, 2024',
-    status: 'Scheduled',
-  },
-  {
-    id: 3,
-    name: 'Evening with Friends',
-    category: 'Entertainment',
-    amount: 52.0,
-    method: 'Amex •• 9044',
-    date: 'Mar 9, 2024',
-    status: 'Cleared',
-  },
-  {
-    id: 4,
-    name: 'Monthly Transit Pass',
-    category: 'Transportation',
-    amount: 89.0,
-    method: 'Visa •• 3124',
-    date: 'Mar 6, 2024',
-    status: 'Pending',
-  },
-  {
-    id: 5,
-    name: 'Streaming Bundle',
-    category: 'Subscriptions',
-    amount: 29.99,
-    method: 'Mastercard •• 4410',
-    date: 'Mar 4, 2024',
-    status: 'Cleared',
-  },
-];
+const TOTAL_BUDGET = 2000;
 
 const budgets = [
   { id: 'food', label: 'Food & Dining', spent: 320, limit: 450 },
@@ -123,6 +51,122 @@ const formatCurrency = (value) =>
     : value;
 
 const App = () => {
+  const [expenses, setExpenses] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchExpenses = async () => {
+      setLoading(true);
+      try {
+        const data = await getExpenses();
+        setExpenses(Array.isArray(data) ? data : []);
+        setError(null);
+      } catch (err) {
+        setError('Unable to load expenses right now.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchExpenses();
+  }, []);
+
+  const totalSpent = expenses.reduce((sum, expense) => {
+    const amount = Number(expense?.amount ?? 0);
+    return sum + (Number.isFinite(amount) ? amount : 0);
+  }, 0);
+
+  const uniqueDays = new Set();
+  expenses.forEach((expense) => {
+    if (!expense?.date) {
+      return;
+    }
+    const date = new Date(expense.date);
+    if (!Number.isNaN(date.getTime())) {
+      uniqueDays.add(date.toDateString());
+    }
+  });
+  const trackedDays = uniqueDays.size;
+  const averageDailySpend = trackedDays ? totalSpent / trackedDays : 0;
+
+  const categoryTotals = expenses.reduce((acc, expense) => {
+    if (!expense?.category) {
+      return acc;
+    }
+    const amount = Number(expense.amount);
+    const safeAmount = Number.isFinite(amount) ? amount : 0;
+    acc[expense.category] = (acc[expense.category] || 0) + safeAmount;
+    return acc;
+  }, {});
+
+  let topCategoryName = '—';
+  let topCategoryAmount = 0;
+  Object.entries(categoryTotals).forEach(([category, amount]) => {
+    if (amount > topCategoryAmount) {
+      topCategoryAmount = amount;
+      topCategoryName = category;
+    }
+  });
+
+  const budgetRemaining = Math.max(TOTAL_BUDGET - totalSpent, 0);
+  const summaryCards = [
+    {
+      id: 'monthSpend',
+      title: 'Spent this month',
+      value: totalSpent,
+      helper: expenses.length
+        ? `Across ${expenses.length} ${
+            expenses.length === 1 ? 'transaction' : 'transactions'
+          }`
+        : 'No expenses recorded yet',
+      tone: totalSpent > TOTAL_BUDGET ? 'alert' : undefined,
+    },
+    {
+      id: 'budget',
+      title: 'Budget remaining',
+      value: budgetRemaining,
+      helper: `of ${formatCurrency(TOTAL_BUDGET)} total budget`,
+      tone: budgetRemaining <= TOTAL_BUDGET * 0.25 ? 'alert' : 'positive',
+    },
+    {
+      id: 'daily',
+      title: 'Average daily spend',
+      value: averageDailySpend,
+      helper: trackedDays
+        ? `Tracked across ${trackedDays} ${trackedDays === 1 ? 'day' : 'days'}`
+        : 'No tracked days yet',
+    },
+    {
+      id: 'topCategory',
+      title: 'Top category',
+      value: topCategoryName,
+      helper:
+        topCategoryName === '—'
+          ? 'Add expenses to identify trends'
+          : `${formatCurrency(topCategoryAmount)} spent`,
+    },
+  ];
+
+  const latestExpenseDate = expenses.reduce((latest, expense) => {
+    if (!expense?.date) {
+      return latest;
+    }
+    const date = new Date(expense.date);
+    if (Number.isNaN(date.getTime())) {
+      return latest;
+    }
+    return !latest || date > latest ? date : latest;
+  }, null);
+
+  const lastUpdatedLabel = loading
+    ? 'Refreshing…'
+    : error
+    ? 'Unable to refresh expenses'
+    : latestExpenseDate
+    ? `Last updated ${latestExpenseDate.toLocaleString()}`
+    : 'No expenses recorded yet';
+
   return (
     <div className="App">
       <div className="app-shell">
@@ -159,7 +203,7 @@ const App = () => {
               <div className="card-heading">
                 <div>
                   <h2>Recent activity</h2>
-                  <p className="muted">Last updated 2 minutes ago</p>
+                  <p className="muted">{lastUpdatedLabel}</p>
                 </div>
                 <button className="ghost-button" type="button">
                   View all
@@ -176,24 +220,46 @@ const App = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {expenseItems.map((expense) => (
-                    <tr key={expense.id}>
-                      <td>
-                        <div className="expense-name">
-                          <strong>{expense.name}</strong>
-                          <span>{expense.date}</span>
-                        </div>
-                      </td>
-                      <td>{expense.category}</td>
-                      <td>{expense.method}</td>
-                      <td className="expense-amount">{formatCurrency(expense.amount)}</td>
-                      <td>
-                        <span className={`status-pill ${expense.status.toLowerCase()}`}>
-                          {expense.status}
-                        </span>
+                  {loading && (
+                    <tr>
+                      <td colSpan="5" className="muted">
+                        Loading expenses…
                       </td>
                     </tr>
-                  ))}
+                  )}
+                  {!loading && error && (
+                    <tr>
+                      <td colSpan="5" className="error">
+                        {error}
+                      </td>
+                    </tr>
+                  )}
+                  {!loading && !error && expenses.length === 0 && (
+                    <tr>
+                      <td colSpan="5" className="muted">
+                        No expenses to display yet.
+                      </td>
+                    </tr>
+                  )}
+                  {!loading && !error &&
+                    expenses.map((expense) => (
+                      <tr key={expense.id}>
+                        <td>
+                          <div className="expense-name">
+                            <strong>{expense.name}</strong>
+                            <span>{expense.date}</span>
+                          </div>
+                        </td>
+                        <td>{expense.category}</td>
+                        <td>{expense.method}</td>
+                        <td className="expense-amount">{formatCurrency(expense.amount)}</td>
+                        <td>
+                          <span className={`status-pill ${expense.status?.toLowerCase?.() || ''}`}>
+                            {expense.status || '—'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </article>
