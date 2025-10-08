@@ -1,43 +1,54 @@
-import axios from "axios";
-
-// Choose API base URL depending on environment
-const API_BASE =
-  process.env.NODE_ENV === "production"
-    ? process.env.REACT_APP_API_URL_PROD
-    : process.env.REACT_APP_API_URL_DEV;
-
-// Helper function for logging and error handling
-const handleRequest = async (requestFunc, description) => {
-  try {
-    console.log(`Calling API: ${description}`);
-    const res = await requestFunc();
-    return res.data;
-  } catch (err) {
-    console.error(`Failed to ${description}:`, err.response?.data || err.message);
-    throw err;
+const resolveBaseUrl = () => {
+  if (process.env.REACT_APP_API_BASE_URL) {
+    return process.env.REACT_APP_API_BASE_URL;
   }
+
+  if (process.env.NODE_ENV === "production" && process.env.REACT_APP_API_URL_PROD) {
+    return process.env.REACT_APP_API_URL_PROD;
+  }
+
+  if (process.env.REACT_APP_API_URL_DEV) {
+    return process.env.REACT_APP_API_URL_DEV;
+  }
+
+  return "";
 };
 
-// Get all expenses
-export const getExpenses = async () => {
-  return handleRequest(
-    () => axios.get(`${API_BASE}/getExpenses`),
-    "get expenses"
-  );
+const API_BASE = resolveBaseUrl().replace(/\/$/, "");
+
+const request = async (path, options = {}) => {
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: { "Content-Type": "application/json", ...(options.headers ?? {}) },
+    ...options,
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Request failed with status ${response.status}`);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  return response.json();
 };
 
-// Add a new expense
-export const addExpense = async (expense) => {
-  return handleRequest(
-    () => axios.post(`${API_BASE}/addExpense`, expense),
-    "add expense"
-  );
-};
+export const getExpenses = () => request("/getExpenses");
 
-export const deleteExpense = async (id) => {
-  return handleRequest(
-    () => axios.delete(`${API_BASE}/expenses/${id}`),
-    `delete expense ${id}`
-  );
-};
+export const addExpense = (expense) =>
+  request("/addExpense", {
+    method: "POST",
+    body: JSON.stringify(expense),
+  });
 
+export const updateExpense = (id, expense) =>
+  request(`/expenses/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(expense),
+  });
+
+export const deleteExpense = (id) =>
+  request(`/expenses/${id}`, {
+    method: "DELETE",
+  });

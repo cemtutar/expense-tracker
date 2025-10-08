@@ -1,372 +1,504 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from "react";
 
-import { getExpenses } from './api';
-import './App.css';
+import { addExpense, deleteExpense, getExpenses, updateExpense } from "./api";
+import "./App.css";
+import {
+  CATEGORY_OPTIONS,
+  ExpenseForm,
+  METHOD_OPTIONS,
+  STATUS_OPTIONS,
+} from "./components/ExpenseForm";
 
-const TOTAL_BUDGET = 2000;
-
-const budgets = [
-  { id: 'food', label: 'Food & Dining', spent: 320, limit: 450 },
-  { id: 'housing', label: 'Housing', spent: 560, limit: 600 },
-  { id: 'transport', label: 'Transportation', spent: 180, limit: 220 },
-  { id: 'wellness', label: 'Wellness', spent: 95, limit: 150 },
-];
-
-const upcoming = [
-  {
-    id: 'trip',
-    title: 'Weekend getaway',
-    description: 'Set aside $420 by April 2 to cover lodging and gas.',
-  },
-  {
-    id: 'insurance',
-    title: 'Annual insurance premium',
-    description: 'Due May 14 — consider moving $80 per paycheck.',
-  },
-  {
-    id: 'laptop',
-    title: 'Laptop upgrade fund',
-    description: 'You are 60% to goal. Add $120 this month to stay on track.',
-  },
-];
-
-const budgetStatus = (spent, limit) => {
-  if (spent > limit) {
-    return 'over';
-  }
-  if (spent / limit > 0.75) {
-    return 'warning';
-  }
-  return 'good';
+const emptyEditValues = {
+  name: "",
+  category: "",
+  amount: "",
+  date: "",
+  method: "",
+  status: "",
 };
 
-const formatCurrency = (value) =>
-  typeof value === 'number'
-    ? value.toLocaleString('en-US', {
-        style: 'currency',
-        currency: 'USD',
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
-      })
-    : value;
+const parseDateValue = (value) => {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date;
+};
 
-const App = () => {
+const formatCurrency = (value) => {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "—";
+  }
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+};
+
+const formatDate = (value) => {
+  const date = parseDateValue(value);
+  if (!date) {
+    return "—";
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+};
+
+const safeText = (value) => {
+  if (typeof value !== "string") {
+    return "—";
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : "—";
+};
+
+const sortExpenses = (expenses) => {
+  const items = Array.isArray(expenses) ? [...expenses] : [];
+  return items.sort((a, b) => {
+    const dateA = parseDateValue(a?.date ?? "");
+    const dateB = parseDateValue(b?.date ?? "");
+    const timeA = dateA ? dateA.getTime() : 0;
+    const timeB = dateB ? dateB.getTime() : 0;
+    return timeB - timeA;
+  });
+};
+
+const getAmountNumber = (value) => {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+
+function App() {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState("");
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editValues, setEditValues] = useState(emptyEditValues);
+  const [modalError, setModalError] = useState("");
+  const [modalLoading, setModalLoading] = useState(false);
 
-  useEffect(() => {
-    const fetchExpenses = async () => {
+  const loadExpenses = async () => {
+    const data = await getExpenses();
+    setExpenses(Array.isArray(data) ? data : []);
+  };
+
+  const refreshExpenses = async (withSpinner = true) => {
+    if (withSpinner) {
       setLoading(true);
-      try {
-        const data = await getExpenses();
-        setExpenses(Array.isArray(data) ? data : []);
-        setError(null);
-      } catch (err) {
-        setError('Unable to load expenses right now.');
-      } finally {
+    }
+
+    try {
+      await loadExpenses();
+      setError("");
+    } catch (err) {
+      setError("Unable to load expenses right now.");
+      throw err;
+    } finally {
+      if (withSpinner) {
         setLoading(false);
       }
-    };
+    }
+  };
 
-    fetchExpenses();
+  useEffect(() => {
+    refreshExpenses().catch(() => {});
   }, []);
 
-  const totalSpent = expenses.reduce((sum, expense) => {
-    const amount = Number(expense?.amount ?? 0);
-    return sum + (Number.isFinite(amount) ? amount : 0);
-  }, 0);
+  const handleAddExpense = async (expense) => {
+    setLoading(true);
+    setError("");
 
-  const uniqueDays = new Set();
-  expenses.forEach((expense) => {
-    if (!expense?.date) {
+    try {
+      await addExpense(expense);
+      await loadExpenses();
+    } catch (err) {
+      setError("Unable to save expense right now.");
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openModal = () => {
+    setIsModalOpen(true);
+    setEditingId(null);
+    setEditValues(emptyEditValues);
+    setModalError("");
+  };
+
+  const closeModal = () => {
+    if (modalLoading) {
       return;
     }
-    const date = new Date(expense.date);
-    if (!Number.isNaN(date.getTime())) {
-      uniqueDays.add(date.toDateString());
-    }
-  });
-  const trackedDays = uniqueDays.size;
-  const averageDailySpend = trackedDays ? totalSpent / trackedDays : 0;
 
-  const categoryTotals = expenses.reduce((acc, expense) => {
-    if (!expense?.category) {
-      return acc;
-    }
-    const amount = Number(expense.amount);
-    const safeAmount = Number.isFinite(amount) ? amount : 0;
-    acc[expense.category] = (acc[expense.category] || 0) + safeAmount;
-    return acc;
-  }, {});
+    setIsModalOpen(false);
+    setEditingId(null);
+    setEditValues(emptyEditValues);
+    setModalError("");
+  };
 
-  let topCategoryName = '—';
-  let topCategoryAmount = 0;
-  Object.entries(categoryTotals).forEach(([category, amount]) => {
-    if (amount > topCategoryAmount) {
-      topCategoryAmount = amount;
-      topCategoryName = category;
+  const startEditingExpense = (expense) => {
+    if (!expense?.id) {
+      return;
     }
-  });
 
-  const budgetRemaining = Math.max(TOTAL_BUDGET - totalSpent, 0);
-  const summaryCards = [
-    {
-      id: 'monthSpend',
-      title: 'Spent this month',
-      value: totalSpent,
-      helper: expenses.length
-        ? `Across ${expenses.length} ${
-            expenses.length === 1 ? 'transaction' : 'transactions'
-          }`
-        : 'No expenses recorded yet',
-      tone: totalSpent > TOTAL_BUDGET ? 'alert' : undefined,
-    },
-    {
-      id: 'budget',
-      title: 'Budget remaining',
-      value: budgetRemaining,
-      helper: `of ${formatCurrency(TOTAL_BUDGET)} total budget`,
-      tone: budgetRemaining <= TOTAL_BUDGET * 0.25 ? 'alert' : 'positive',
-    },
-    {
-      id: 'daily',
-      title: 'Average daily spend',
-      value: averageDailySpend,
-      helper: trackedDays
-        ? `Tracked across ${trackedDays} ${trackedDays === 1 ? 'day' : 'days'}`
-        : 'No tracked days yet',
-    },
-    {
-      id: 'topCategory',
-      title: 'Top category',
-      value: topCategoryName,
-      helper:
-        topCategoryName === '—'
-          ? 'Add expenses to identify trends'
-          : `${formatCurrency(topCategoryAmount)} spent`,
-    },
-  ];
+    setEditingId(expense.id);
+    setEditValues({
+      name: typeof expense.name === "string" ? expense.name : "",
+      category: typeof expense.category === "string" ? expense.category : "",
+      amount:
+        expense.amount === 0 || typeof expense.amount === "number"
+          ? String(expense.amount)
+          : "",
+      date: typeof expense.date === "string" ? expense.date : "",
+      method: typeof expense.method === "string" ? expense.method : "",
+      status: typeof expense.status === "string" ? expense.status : "",
+    });
+    setModalError("");
+  };
 
-  const latestExpenseDate = expenses.reduce((latest, expense) => {
-    if (!expense?.date) {
-      return latest;
+  const cancelEdit = () => {
+    if (modalLoading) {
+      return;
     }
-    const date = new Date(expense.date);
-    if (Number.isNaN(date.getTime())) {
-      return latest;
-    }
-    return !latest || date > latest ? date : latest;
-  }, null);
 
-  const lastUpdatedLabel = loading
-    ? 'Refreshing…'
-    : error
-    ? 'Unable to refresh expenses'
-    : latestExpenseDate
-    ? `Last updated ${latestExpenseDate.toLocaleString()}`
-    : 'No expenses recorded yet';
+    setEditingId(null);
+    setEditValues(emptyEditValues);
+    setModalError("");
+  };
+
+  const updateEditField = (field, value) => {
+    setEditValues((previous) => ({ ...previous, [field]: value }));
+  };
+
+  const saveEdit = async () => {
+    if (!editingId || modalLoading) {
+      return;
+    }
+
+    const trimmed = {
+      name: editValues.name.trim(),
+      category: editValues.category.trim(),
+      date: editValues.date.trim(),
+      method: editValues.method.trim(),
+      status: editValues.status.trim(),
+      amountText: editValues.amount.trim(),
+    };
+
+    const amountNumber = Number(trimmed.amountText);
+
+    if (
+      !trimmed.name ||
+      !trimmed.category ||
+      !trimmed.date ||
+      !trimmed.method ||
+      !trimmed.status ||
+      trimmed.amountText === "" ||
+      !Number.isFinite(amountNumber)
+    ) {
+      setModalError("Please provide every field with a valid value.");
+      return;
+    }
+
+    setModalLoading(true);
+    setModalError("");
+
+    try {
+      await updateExpense(editingId, {
+        name: trimmed.name,
+        category: trimmed.category,
+        date: trimmed.date,
+        method: trimmed.method,
+        status: trimmed.status,
+        amount: amountNumber,
+      });
+      await refreshExpenses(false);
+      setEditingId(null);
+      setEditValues(emptyEditValues);
+    } catch (error) {
+      setModalError("Unable to update expense right now.");
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const handleDeleteExpense = async (id) => {
+    if (!id || modalLoading) {
+      return;
+    }
+
+    setModalLoading(true);
+    setModalError("");
+
+    try {
+      await deleteExpense(id);
+      await refreshExpenses(false);
+      if (editingId === id) {
+        setEditingId(null);
+        setEditValues(emptyEditValues);
+      }
+    } catch (error) {
+      setModalError("Unable to delete expense right now.");
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const sortedExpenses = useMemo(() => sortExpenses(expenses), [expenses]);
+  const recentExpenses = useMemo(() => sortedExpenses.slice(0, 5), [sortedExpenses]);
+
+  const totalSpent = useMemo(
+    () => sortedExpenses.reduce((sum, expense) => sum + getAmountNumber(expense.amount), 0),
+    [sortedExpenses]
+  );
+
+  const modalBackdropClick = (event) => {
+    if (event.target === event.currentTarget) {
+      closeModal();
+    }
+  };
 
   return (
-    <div className="App">
-      <div className="app-shell">
-        <header className="app-header">
-          <div className="header-content">
-            <div>
-              <p className="eyebrow">Personal finance snapshot</p>
-              <h1>Expense Tracker</h1>
-              <p className="subtitle">
-                Monitor your spending, stay within your budget, and plan the moments that
-                matter most.
-              </p>
-            </div>
-            <button className="primary-button" type="button">
-              + Add quick expense
+    <div className="app-shell">
+      <header className="app-header">
+        <h1>Expense tracker</h1>
+        <p>Log every purchase and keep tabs on where your money is going.</p>
+      </header>
+
+      {error ? <p className="global-error">{error}</p> : null}
+
+      <main className="layout">
+        <ExpenseForm onSubmit={handleAddExpense} disabled={loading} />
+
+        <section className="panel">
+          <div className="panel-header">
+            <h2 className="panel-title">Recent activity</h2>
+            <button type="button" className="link" onClick={openModal} disabled={!sortedExpenses.length}>
+              View all
             </button>
           </div>
-          <div className="stats-grid">
-            {summaryCards.map((card) => (
-              <article key={card.id} className="stat-card">
-                <p className="stat-title">{card.title}</p>
-                <p className={`stat-value ${card.tone ?? ''}`}>
-                  {formatCurrency(card.value)}
-                </p>
-                <p className="stat-helper">{card.helper}</p>
-              </article>
-            ))}
-          </div>
-        </header>
 
-        <main className="app-main">
-          <section className="layout-grid primary-grid">
-            <article className="card expenses-card">
-              <div className="card-heading">
-                <div>
-                  <h2>Recent activity</h2>
-                  <p className="muted">{lastUpdatedLabel}</p>
-                </div>
-                <button className="ghost-button" type="button">
-                  View all
-                </button>
+          {loading && !sortedExpenses.length ? (
+            <p className="empty">Loading expenses…</p>
+          ) : null}
+
+          {!loading && !sortedExpenses.length ? (
+            <p className="empty">No expenses logged yet. Add your first expense to get started.</p>
+          ) : null}
+
+          {recentExpenses.length ? (
+            <table className="expenses-table" aria-label="Recent expenses">
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Date</th>
+                  <th scope="col">Category</th>
+                  <th scope="col">Payment</th>
+                  <th scope="col">Amount</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentExpenses.map((expense) => (
+                  <tr key={expense.id ?? `${expense.name}-${expense.date}`}>
+                    <td>{safeText(expense.name)}</td>
+                    <td>{formatDate(expense.date)}</td>
+                    <td>{safeText(expense.category)}</td>
+                    <td>{safeText(expense.method)}</td>
+                    <td>{formatCurrency(typeof expense.amount === "number" ? expense.amount : null)}</td>
+                    <td>{safeText(expense.status)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : null}
+
+          {sortedExpenses.length ? (
+            <p className="total">Total tracked spending: {formatCurrency(totalSpent)}</p>
+          ) : null}
+        </section>
+      </main>
+
+      {isModalOpen ? (
+        <div className="modal-backdrop" onClick={modalBackdropClick}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="transactions-title">
+            <div className="modal-header">
+              <div>
+                <h2 id="transactions-title">All transactions</h2>
+                <p className="modal-subtitle">Edit or delete any expense without leaving this view.</p>
               </div>
-              <table className="expense-table">
+              <button type="button" className="link" onClick={closeModal} disabled={modalLoading}>
+                Close
+              </button>
+            </div>
+
+            {modalError ? <p className="modal-error">{modalError}</p> : null}
+
+            <div className="table-scroll">
+              <table className="expenses-table" aria-label="All expenses">
                 <thead>
                   <tr>
-                    <th>Expense</th>
-                    <th>Category</th>
-                    <th>Payment</th>
-                    <th>Amount</th>
-                    <th>Status</th>
+                    <th scope="col">Name</th>
+                    <th scope="col">Date</th>
+                    <th scope="col">Category</th>
+                    <th scope="col">Payment</th>
+                    <th scope="col">Amount</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" className="actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && (
-                    <tr>
-                      <td colSpan="5" className="muted">
-                        Loading expenses…
-                      </td>
-                    </tr>
-                  )}
-                  {!loading && error && (
-                    <tr>
-                      <td colSpan="5" className="error">
-                        {error}
-                      </td>
-                    </tr>
-                  )}
-                  {!loading && !error && expenses.length === 0 && (
-                    <tr>
-                      <td colSpan="5" className="muted">
-                        No expenses to display yet.
-                      </td>
-                    </tr>
-                  )}
-                  {!loading && !error &&
-                    expenses.map((expense) => (
-                      <tr key={expense.id}>
+                  {sortedExpenses.map((expense) => {
+                    const isEditing = editingId === expense.id;
+                    return (
+                      <tr key={expense.id ?? `${expense.name}-${expense.date}`}>
                         <td>
-                          <div className="expense-name">
-                            <strong>{expense.name}</strong>
-                            <span>{expense.date}</span>
-                          </div>
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              value={editValues.name}
+                              onChange={(event) => updateEditField("name", event.target.value)}
+                              disabled={modalLoading}
+                            />
+                          ) : (
+                            safeText(expense.name)
+                          )}
                         </td>
-                        <td>{expense.category}</td>
-                        <td>{expense.method}</td>
-                        <td className="expense-amount">{formatCurrency(expense.amount)}</td>
                         <td>
-                          <span className={`status-pill ${expense.status?.toLowerCase?.() || ''}`}>
-                            {expense.status || '—'}
-                          </span>
+                          {isEditing ? (
+                            <input
+                              type="date"
+                              value={editValues.date}
+                              onChange={(event) => updateEditField("date", event.target.value)}
+                              disabled={modalLoading}
+                            />
+                          ) : (
+                            formatDate(expense.date)
+                          )}
+                        </td>
+                        <td>
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              list="modal-category-options"
+                              value={editValues.category}
+                              onChange={(event) => updateEditField("category", event.target.value)}
+                              disabled={modalLoading}
+                            />
+                          ) : (
+                            safeText(expense.category)
+                          )}
+                        </td>
+                        <td>
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              list="modal-method-options"
+                              value={editValues.method}
+                              onChange={(event) => updateEditField("method", event.target.value)}
+                              disabled={modalLoading}
+                            />
+                          ) : (
+                            safeText(expense.method)
+                          )}
+                        </td>
+                        <td>
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={editValues.amount}
+                              onChange={(event) => updateEditField("amount", event.target.value)}
+                              disabled={modalLoading}
+                            />
+                          ) : (
+                            formatCurrency(typeof expense.amount === "number" ? expense.amount : null)
+                          )}
+                        </td>
+                        <td>
+                          {isEditing ? (
+                            <select
+                              value={editValues.status}
+                              onChange={(event) => updateEditField("status", event.target.value)}
+                              disabled={modalLoading}
+                            >
+                              <option value="" disabled>
+                                Select status
+                              </option>
+                              {STATUS_OPTIONS.map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            safeText(expense.status)
+                          )}
+                        </td>
+                        <td className="actions">
+                          {isEditing ? (
+                            <div className="action-buttons">
+                              <button type="button" className="primary" onClick={saveEdit} disabled={modalLoading}>
+                                Save
+                              </button>
+                              <button type="button" className="secondary" onClick={cancelEdit} disabled={modalLoading}>
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="action-buttons">
+                              <button
+                                type="button"
+                                className="secondary"
+                                onClick={() => startEditingExpense(expense)}
+                                disabled={modalLoading}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="danger"
+                                onClick={() => handleDeleteExpense(expense.id)}
+                                disabled={modalLoading}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
-                    ))}
+                    );
+                  })}
                 </tbody>
               </table>
-            </article>
+            </div>
 
-            <article className="card add-expense-card">
-              <div className="card-heading">
-                <h2>Log a new expense</h2>
-                <p className="muted">Quickly capture spending to keep your budgets accurate.</p>
-              </div>
-              <form className="expense-form">
-                <label className="form-field">
-                  <span>Expense name</span>
-                  <input type="text" name="name" placeholder="Coffee with clients" />
-                </label>
-                <label className="form-field">
-                  <span>Category</span>
-                  <select name="category" defaultValue="">
-                    <option value="" disabled>
-                      Select a category
-                    </option>
-                    <option value="food">Food & Dining</option>
-                    <option value="housing">Housing</option>
-                    <option value="transport">Transportation</option>
-                    <option value="entertainment">Entertainment</option>
-                    <option value="wellness">Wellness</option>
-                    <option value="other">Other</option>
-                  </select>
-                </label>
-                <div className="form-row">
-                  <label className="form-field">
-                    <span>Amount</span>
-                    <input type="number" name="amount" placeholder="0.00" min="0" />
-                  </label>
-                  <label className="form-field">
-                    <span>Date</span>
-                    <input type="date" name="date" />
-                  </label>
-                </div>
-                <label className="form-field">
-                  <span>Payment method</span>
-                  <input type="text" name="method" placeholder="Card, cash, or account" />
-                </label>
-                <button className="primary-button" type="submit">
-                  Add expense
-                </button>
-              </form>
-            </article>
-          </section>
-
-          <section className="layout-grid insights-grid">
-            <article className="card budgets-card">
-              <div className="card-heading">
-                <h2>Category budgets</h2>
-                <p className="muted">Stay mindful of your spending goals across categories.</p>
-              </div>
-              <ul className="budget-list">
-                {budgets.map((budget) => {
-                  const percent = Math.round((budget.spent / budget.limit) * 100);
-                  const status = budgetStatus(budget.spent, budget.limit);
-                  return (
-                    <li key={budget.id} className="budget-item">
-                      <div className="budget-meta">
-                        <div>
-                          <p className="budget-label">{budget.label}</p>
-                          <span className="muted">
-                            {formatCurrency(budget.spent)} of {formatCurrency(budget.limit)}
-                          </span>
-                        </div>
-                        <span className={`budget-percent ${status}`}>
-                          {percent}%
-                        </span>
-                      </div>
-                      <div className="progress">
-                        <div
-                          className={`progress-bar ${status}`}
-                          style={{ width: `${Math.min(percent, 110)}%` }}
-                        />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </article>
-
-            <article className="card planning-card">
-              <div className="card-heading">
-                <h2>Planning ahead</h2>
-                <p className="muted">A few suggestions to keep future spending stress-free.</p>
-              </div>
-              <ul className="planning-list">
-                {upcoming.map((item) => (
-                  <li key={item.id}>
-                    <h3>{item.title}</h3>
-                    <p>{item.description}</p>
-                  </li>
-                ))}
-              </ul>
-              <div className="tip-box">
-                <strong>Tip:</strong> Automate a small weekly transfer into your savings to make
-                progress on goals without thinking about it.
-              </div>
-            </article>
-          </section>
-        </main>
-      </div>
+            <datalist id="modal-category-options">
+              {CATEGORY_OPTIONS.map((option) => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
+            <datalist id="modal-method-options">
+              {METHOD_OPTIONS.map((option) => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
-};
+}
 
 export default App;

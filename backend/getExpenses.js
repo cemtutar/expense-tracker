@@ -1,25 +1,37 @@
 import { DynamoDBClient, ScanCommand } from "@aws-sdk/client-dynamodb";
 
+const TABLE_NAME = process.env.EXPENSES_TABLE ?? "Expenses";
+const client = new DynamoDBClient({});
 
-const client = new DynamoDBClient();
-
+const mapExpenseItem = (item = {}) => ({
+  id: item.id?.S ?? null,
+  name: item.name?.S ?? null,
+  category: item.category?.S ?? null,
+  date: item.date?.S ?? null,
+  method: item.method?.S ?? null,
+  status: item.status?.S ?? null,
+  amount: item.amount?.N ? Number(item.amount.N) : null,
+});
 
 export const handler = async () => {
-    const data = await client.send(new ScanCommand({ TableName: "Expenses" }));
+  try {
+    const response = await client.send(
+      new ScanCommand({
+        TableName: TABLE_NAME,
+      })
+    );
 
+    const items = Array.isArray(response.Items) ? response.Items : [];
+    const expenses = items.map(mapExpenseItem);
 
-    const expenses = data.Items.map((item) => ({
-        id: item.id.S,
-        amount: Number(item.amount.N),
-        category: item.category.S,
-        date: item.date.S,
-    }));
-
-
-    return { statusCode: 200, body: JSON.stringify(expenses) };
+    return {
+      statusCode: 200,
+      body: JSON.stringify(expenses),
+    };
+  } catch (error) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ message: "Failed to load expenses", error: error.message }),
+    };
+  }
 };
-
-if (typeof API_BASE !== "undefined") {
-    console.log("API_BASE:", API_BASE);
-    console.log("Full URL:", `${API_BASE}/getExpenses`);
-}
